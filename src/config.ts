@@ -1,9 +1,10 @@
+import 'dotenv/config';
 import { WorkerLogLevel, WorkerLogTag } from 'mediasoup/node/lib/Worker';
 import { RtpCodecCapability } from 'mediasoup/node/lib/RtpParameters';
 
 export default {
-    listenIp: (process.env.LISTEN_IP || '0.0.0.0') as string,
-    listenPort: (process.env.LISTEN_PORT || 3000) as number,
+    listenIp: (process.env.SOCKET_SERVER_IP || '0.0.0.0') as string,
+    listenPort: (process.env.PORT || 3000) as number,
     sslCrt: './.cert/cert.pem',
     sslKey: './.cert/key.pem',
     mediaSoup: {
@@ -46,7 +47,7 @@ export default {
         webRtcTransport: {
             listenIps: [
                 {
-                    ip: process.env.LISTEN_IP || '',
+                    ip: process.env.SOCKET_SERVER_IP || '0.0.0.0',
                     announcedIp: undefined,
                 },
             ],
