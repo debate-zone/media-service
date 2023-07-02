@@ -1,4 +1,5 @@
-import express, { Express, NextFunction, Request, Response } from 'express';
+import { Express, NextFunction, Request, Response } from 'express';
+import * as express from 'express';
 import {
     Server as HttpsServer,
     createServer as createHttpsServer,
@@ -39,6 +40,7 @@ let worker: Worker;
 async function runExpressApp() {
     expressApp = express();
     expressApp.use(express.json());
+    expressApp.use(express.static(__dirname));
 
     expressApp.use(
         (error: any, req: Request, res: Response, next: NextFunction) => {
@@ -74,9 +76,11 @@ async function runWebServer() {
 
     await new Promise(resolve => {
         const { listenIp, listenPort } = config;
+
         webServer.listen(listenPort, listenIp, () => {
             const listenIps = config.mediaSoup.webRtcTransport.listenIps[0];
             const ip = listenIps.announcedIp || listenIps.ip;
+            console.log(listenIps);
             console.info('server is running');
             console.info(
                 `open https://${ip}:${listenPort} in your web browser`,
@@ -87,110 +91,117 @@ async function runWebServer() {
 }
 
 async function runSocketServer() {
-    socketServer = new SocketServer(webServer, {
-        serveClient: false,
-        path: '/media',
-    }).on('connection', async socket => {
-        let userId: string;
+    socketServer = new SocketServer(webServer).on(
+        'connection',
+        async socket => {
+            let userId: string = '';
 
-        const token = socket.handshake.auth.token;
+            // const token = socket.handshake.auth.token;
+            //
+            // if (token) {
+            //     const outputDecodedToken: OutputDecodedToken = await verify(
+            //         token,
+            //     );
+            //
+            //     userId = outputDecodedToken.userId;
+            // } else {
+            //     throw new Error(`Can't find token in auth. Token: ${token}`);
+            // }
 
-        if (token) {
-            const outputDecodedToken: OutputDecodedToken = await verify(token);
+            const deviceName = socket.handshake.query.deviceName as string;
+            const debateZoneId =
+                (socket.handshake.query.debateZoneId as string) ||
+                '64a0a221ef6344a03a89a5b7';
 
-            userId = outputDecodedToken.userId;
-        } else {
-            throw new Error(`Can't find token in auth. Token: ${token}`);
-        }
-
-        const deviceName = socket.handshake.query.deviceName as string;
-        const debateZoneId = socket.handshake.query.debateZoneId as string;
-
-        if (!debateZoneId) {
-            throw new Error(
-                `Can't join to debateZoneId ${debateZoneId}. Not found in query params`,
-            );
-        } else {
-            socket.join(debateZoneId);
-            console.info(
-                `User with "${socket.id}"(socketId) & ${userId}(userId) connected to room: ${debateZoneId}(debateZoneId) from: ${deviceName}(deviceName)`,
-            );
-        }
-
-        if (producer) {
-            socket.emit('newProducer');
-        }
-
-        socket.on('disconnect', () => {
-            console.info(
-                `User with "${socket.id}"(socketId) disconnected & ${userId}(userId) disconnected from: ${deviceName}(deviceName)`,
-            );
-        });
-
-        socket.on('connect_error', err => {
-            console.error('client connection error', err);
-        });
-
-        socket.on('getRouterRtpCapabilities', (data, callback) => {
-            callback(mediaSoupRouter.rtpCapabilities);
-        });
-
-        socket.on('createProducerTransport', async (data, callback) => {
-            try {
-                const { transport, params } = await createWebRtcTransport();
-                producerTransport = transport;
-                callback(params);
-            } catch (err: any) {
-                console.error(err);
-                callback({ error: err.message });
+            if (!debateZoneId) {
+                throw new Error(
+                    `Can't join to debateZoneId ${debateZoneId}. Not found in query params`,
+                );
+            } else {
+                socket.join(debateZoneId);
+                console.info(
+                    `User with "${socket.id}"(socketId) & ${userId}(userId) connected to room: ${debateZoneId}(debateZoneId) from: ${deviceName}(deviceName)`,
+                );
             }
-        });
 
-        socket.on('createConsumerTransport', async (data, callback) => {
-            try {
-                const { transport, params } = await createWebRtcTransport();
-                consumerTransport = transport;
-                callback(params);
-            } catch (err: any) {
-                console.error(err);
-                callback({ error: err.message });
+            if (producer) {
+                socket.emit('newProducer');
             }
-        });
 
-        socket.on('connectProducerTransport', async (data, callback) => {
-            await producerTransport.connect({
-                dtlsParameters: data.dtlsParameters,
+            socket.on('disconnect', () => {
+                socket.leave(debateZoneId);
+
+                console.info(
+                    `User with "${socket.id}"(socketId) disconnected & ${userId}(userId) disconnected from: ${deviceName}(deviceName)`,
+                );
             });
-            callback();
-        });
 
-        socket.on('connectConsumerTransport', async (data, callback) => {
-            await consumerTransport.connect({
-                dtlsParameters: data.dtlsParameters,
+            socket.on('connect_error', err => {
+                console.error('client connection error', err);
             });
-            callback();
-        });
 
-        socket.on('produce', async (data, callback) => {
-            const { kind, rtpParameters } = data;
-            producer = await producerTransport.produce({
-                kind,
-                rtpParameters,
+            socket.on('getRouterRtpCapabilities', (data, callback) => {
+                callback(mediaSoupRouter.rtpCapabilities);
             });
-            callback({ id: producer.id });
 
-            socket.broadcast.emit('newProducer');
-        });
+            socket.on('createProducerTransport', async (data, callback) => {
+                console.log('createProducerTransport');
+                try {
+                    const { transport, params } = await createWebRtcTransport();
+                    producerTransport = transport;
+                    callback(params);
+                } catch (err: any) {
+                    console.error(err);
+                    callback({ error: err.message });
+                }
+            });
 
-        socket.on('consume', async (data, callback) => {
-            callback(await createConsumer(producer, data.rtpCapabilities));
-        });
+            socket.on('createConsumerTransport', async (data, callback) => {
+                try {
+                    const { transport, params } = await createWebRtcTransport();
+                    consumerTransport = transport;
+                    callback(params);
+                } catch (err: any) {
+                    console.error(err);
+                    callback({ error: err.message });
+                }
+            });
 
-        socket.on('resume', async (data, callback) => {
-            await consumer.resume();
-            callback();
-        });
-    });
+            socket.on('connectProducerTransport', async (data, callback) => {
+                await producerTransport.connect({
+                    dtlsParameters: data.dtlsParameters,
+                });
+                callback();
+            });
+
+            socket.on('connectConsumerTransport', async (data, callback) => {
+                await consumerTransport.connect({
+                    dtlsParameters: data.dtlsParameters,
+                });
+                callback();
+            });
+
+            socket.on('produce', async (data, callback) => {
+                const { kind, rtpParameters } = data;
+                producer = await producerTransport.produce({
+                    kind,
+                    rtpParameters,
+                });
+                callback({ id: producer.id });
+
+                socket.broadcast.emit('newProducer');
+            });
+
+            socket.on('consume', async (data, callback) => {
+                callback(await createConsumer(producer, data.rtpCapabilities));
+            });
+
+            socket.on('resume', async (data, callback) => {
+                await consumer.resume();
+                callback();
+            });
+        },
+    );
 }
 
 async function runMediaSoupWorker() {
